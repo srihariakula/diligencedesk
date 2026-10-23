@@ -12,7 +12,7 @@ const intent = (process.argv[2] ?? "CORPORATE_REGISTRY_LOOKUP") as DiligenceInte
 if (!DILIGENCE_INTENTS.includes(intent)) throw new Error(`Unknown intent ${intent}`);
 
 const network = networkConfig();
-const [miner] = rankMiners(await fetchMiners(intent));
+const [miner] = rankMiners(await fetchMiners(intent), { intent, jurisdiction: "GB" });
 if (!miner) throw new Error(`No live miner for ${intent}`);
 
 const client = createTelegraphClient();

@@ -16,7 +16,8 @@ export async function diligence(input: DiligenceInput, onCall?: (c: CallRecord) 
 
   const { findings, verdict } = await runDiligence(input, {
     client,
-    minersFor: async (intent) => rankMiners(await fetchMiners(intent, network.nodeUrl)),
+    minersFor: async (intent) =>
+      rankMiners(await fetchMiners(intent, network.nodeUrl), { intent, jurisdiction: input.jurisdictions[0] }),
     budget,
     timeoutMs: spend.providerTimeoutMs,
     providersPerIntent: spend.providersPerIntent,

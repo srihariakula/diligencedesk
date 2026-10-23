@@ -12,6 +12,7 @@ export interface Miner {
   id: string | number;
   slug?: string;
   name?: string;
+  description?: string;
   supported_intents?: string[];
   endpoints?: unknown;
   input_schema?: unknown;
