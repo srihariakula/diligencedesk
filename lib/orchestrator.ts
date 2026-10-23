@@ -75,7 +75,10 @@ async function checkIntent(intent: DiligenceIntent, input: DiligenceInput, deps:
         deps.budget.release(price);
         deps.budget.reserve(record.costUsd);
       }
-      answers.push(interpret(intent, answer.result));
+      const reading = interpret(intent, answer.result);
+      // Paid, but about something else: keep the receipt, don't count it, try the next provider.
+      if (reading.status === "unavailable") record.error = reading.summary;
+      else answers.push(reading);
     } catch (e) {
       deps.budget.release(price); // failed calls are not charged
       record.error = msg(e);
@@ -85,7 +88,7 @@ async function checkIntent(intent: DiligenceIntent, input: DiligenceInput, deps:
     deps.onCall?.(record);
   }
 
-  if (!answers.length) return { intent, status: "unavailable", summary: "no provider answered", sources: calls };
+  if (!answers.length) return { intent, status: "unavailable", summary: "no provider gave a usable answer", sources: calls };
   const worst = answers.reduce((a, b) => (SEVERITY[b.status] > SEVERITY[a.status] ? b : a));
   const disagree = new Set(answers.map((a) => a.status)).size > 1;
   return {

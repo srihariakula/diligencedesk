@@ -41,12 +41,14 @@ export const BLOCKED_MINERS: Record<string, string> = {
   "98009": "Clearbit Company Suggest: name autocomplete, not a registry",
   "98010": "Brandfetch Corp Search: brand data, not a registry",
   "78010": "CourtListener Entity Search: any court case would read as a sanctions hit",
+
+  // Fail on every call (seen in live runs on 2026-10-23)
+  "78003": "OFAC SDN XML: returns the whole list, upstream rejects it (>20 MB); timed out or HTTP 500",
 };
 
 /** Miners known to be real sources for their Intent. Ranked ahead of others within the same coverage tier. */
 export const PREFERRED_MINERS: Record<string, string> = {
   "78021": "OFAC SDN Entity Screen",
-  "78003": "OFAC SDN XML",
   "78022": "UN Consolidated Sanctions Screen",
   "80011": "SEC EDGAR Has Form",
   "190160": "Filing Sec Submissions",

@@ -15,7 +15,7 @@ import type { MinerRequest } from "./telegraph";
 export class UnsupportedRequestError extends Error {}
 
 export function buildRequest(intent: DiligenceIntent, miner: Miner, input: DiligenceInput, jurisdiction?: string): MinerRequest {
-  const { method, endpoint } = pickEndpoint(miner);
+  const { method, endpoint } = pickEndpoint(miner, intent);
   const common = {
     query: describeQuery(intent, input, jurisdiction),
     company_name: input.companyName,
@@ -107,12 +107,16 @@ function schemaOf(miner: Miner): { properties: Record<string, unknown>; required
 
 export function interpret(intent: DiligenceIntent, result: unknown): { status: FindingStatus; summary: string } {
   const r = flatten(result);
-  const bool = (...keys: string[]) => keys.map((k) => r[k]).find((v) => typeof v === "boolean") as boolean | undefined;
+  // Miners answer yes/no as booleans or as 1/0.
+  const bool = (...keys: string[]) =>
+    keys.map((k) => r[k]).map((v) => (v === 1 || v === 0 ? v === 1 : v)).find((v) => typeof v === "boolean") as boolean | undefined;
+  const nonAnswer = notAnAnswer(r);
+  if (nonAnswer) return { status: "unavailable", summary: `provider could not answer (${nonAnswer})` };
   const text = JSON.stringify(result ?? "").toLowerCase();
 
   switch (intent) {
     case "SANCTIONS_SCREENING_MATCH": {
-      const hit = bool("match", "is_match", "sanctioned", "hit", "is_sanctioned");
+      const hit = bool("match", "is_match", "sanctioned", "hit", "is_sanctioned", "on_list");
       const count = numberOf(r, "match_count", "matches_count", "hits");
       if (hit === true || (count ?? 0) > 0) return { status: "hit", summary: `possible sanctions/watchlist match${count ? ` (${count})` : ""}` };
       if (hit === false || count === 0) return { status: "clear", summary: "no sanctions or watchlist match" };
@@ -140,7 +144,7 @@ export function interpret(intent: DiligenceIntent, result: unknown): { status: F
       break;
     }
   }
-  return { status: "unclear", summary: preview(result) };
+  return { status: "unclear", summary: `not a yes/no answer, check manually: ${preview(result)}` };
 }
 
 function describeQuery(intent: DiligenceIntent, input: DiligenceInput, jurisdiction?: string): string {
@@ -151,15 +155,19 @@ function describeQuery(intent: DiligenceIntent, input: DiligenceInput, jurisdict
     case "SANCTIONS_SCREENING_MATCH":
       return `Screen ${who} against sanctions and watchlists. Return any matches with list name and score.`;
     case "REGULATORY_FILING_MONITOR":
-      return `List recent regulatory filings or enforcement actions for ${who}.`;
+      return `List recent regulatory filings for ${who}, and any action regulators have taken against it.`;
     case "DOCUMENT_AUTHENTICITY":
       return `Assess whether the document at ${input.documentUrl ?? "(none provided)"} for ${who} is authentic.`;
   }
 }
 
-function pickEndpoint(miner: Miner): { method: "GET" | "POST"; endpoint: string } {
+function pickEndpoint(miner: Miner, intent: DiligenceIntent): { method: "GET" | "POST"; endpoint: string } {
   const eps = miner.endpoints as unknown;
-  const first = Array.isArray(eps) ? eps[0] : eps && typeof eps === "object" ? Object.values(eps)[0] : undefined;
+  const list: unknown[] = Array.isArray(eps) ? eps : eps && typeof eps === "object" ? Object.values(eps) : [];
+  // Multi-intent miners expose one endpoint per Intent; their first endpoint answers something else entirely.
+  const forIntent = list.find((e) => e && typeof e === "object" && String((e as Record<string, unknown>).description ?? "").includes(intent));
+  if (!forIntent && (miner.supported_intents?.length ?? 0) > 3) throw new UnsupportedRequestError(`has no endpoint for ${intent}`);
+  const first = forIntent ?? list[0];
   if (first && typeof first === "object") {
     const e = first as Record<string, unknown>;
     const endpoint = String(e.path ?? e.endpoint ?? e.route ?? "/");
@@ -168,6 +176,14 @@ function pickEndpoint(miner: Miner): { method: "GET" | "POST"; endpoint: string 
   }
   if (typeof first === "string") return { method: "POST", endpoint: first };
   return { method: "POST", endpoint: "/" };
+}
+
+/** A reply that is about something else: the miner rejected the input or says it is guessing. */
+function notAnAnswer(r: Record<string, unknown>): string | undefined {
+  const status = String(r.status ?? "").toLowerCase();
+  if (/^(invalid_input|invalid|error|unsupported|bad_request|not_supported)$/.test(status)) return status;
+  if (typeof r.confidence === "number" && r.confidence < 0.3) return `confidence ${r.confidence}`;
+  return undefined;
 }
 
 function flatten(v: unknown, out: Record<string, unknown> = {}, depth = 0): Record<string, unknown> {
@@ -190,5 +206,11 @@ function numberOf(r: Record<string, unknown>, ...keys: string[]): number | undef
   return Array.isArray(m) ? m.length : undefined;
 }
 
-const preview = (v: unknown) => JSON.stringify(v ?? null).slice(0, 160);
+/** The miner's own sentence when it gives one (answer/signal/summary), else the raw JSON; truncated. */
+function preview(v: unknown): string {
+  const r = v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+  const sentence = [r.answer, r.signal, r.summary].find((x) => typeof x === "string" && x.trim());
+  const text = typeof sentence === "string" ? sentence.trim() : JSON.stringify(v ?? null);
+  return text.length > 160 ? `${text.slice(0, 157)}...` : text;
+}
 const dropUndefined = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));

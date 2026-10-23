@@ -74,3 +74,15 @@ describe("runDiligence with unsupported miners", () => {
     expect(d.budget.spentUsd).toBeCloseTo(0.01 * 2 * findings.length);
   });
 });
+
+describe("runDiligence with off-topic replies", () => {
+  it("does not count a paid non-answer, and asks the next provider", async () => {
+    const d = deps((id, q) => (id === "1" ? { status: "invalid_input", confidence: 0.1 } : clean(q)));
+    const { findings, verdict } = await runDiligence(input, d);
+    expect(verdict.verdict).toBe("GO");
+    for (const f of findings) {
+      expect(f.sources.map((c) => c.minerId)).toEqual(["1", "2", "3"]);
+      expect(f.sources[0]).toMatchObject({ ok: true, costUsd: 0.01, error: expect.stringMatching(/could not answer/) });
+    }
+  });
+});
