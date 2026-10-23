@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { BudgetExceededError } from "@/lib/budget";
 import { diligence } from "@/lib/diligence";
 import type { DiligenceInput } from "@/lib/types";
 
@@ -29,6 +30,7 @@ export async function POST(req: Request) {
   try {
     return NextResponse.json(await diligence(input));
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 502 });
+    const status = e instanceof BudgetExceededError ? 429 : 502; // 429: the day's spend cap is used up
+    return NextResponse.json({ error: (e as Error).message }, { status });
   }
 }

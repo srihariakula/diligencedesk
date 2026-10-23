@@ -86,3 +86,17 @@ describe("runDiligence with off-topic replies", () => {
     }
   });
 });
+
+describe("runDiligence spend accounting", () => {
+  it("books a failed call whose payment was already sent, and releases one that never paid", async () => {
+    const { TelegraphCallError } = await import("@/lib/telegraph");
+    const d = deps((id, q) => (id === "1" ? new TelegraphCallError("HTTP 500 upstream", true) : id === "2" ? new TelegraphCallError("refused", false) : clean(q)), {
+      providersPerIntent: 1,
+    });
+    const { findings } = await runDiligence(input, d);
+    for (const f of findings) {
+      expect(f.sources.map((c) => [c.minerId, c.ok, c.costUsd])).toEqual([["1", false, 0.01], ["2", false, 0], ["3", true, 0.01]]);
+    }
+    expect(d.budget.spentUsd).toBeCloseTo(0.02 * findings.length);
+  });
+});

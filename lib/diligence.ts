@@ -1,5 +1,6 @@
 import { networkConfig, spendConfig } from "@/config/network";
-import { BudgetGuard } from "./budget";
+import { BudgetExceededError, BudgetGuard } from "./budget";
+import { spentTodayUsd } from "./ledger";
 import { buildPack } from "./pack";
 import { fetchMiners, rankMiners } from "./registry";
 import { runDiligence } from "./orchestrator";
@@ -12,7 +13,10 @@ export async function diligence(input: DiligenceInput, onCall?: (c: CallRecord) 
   const spend = spendConfig();
   const account = agentAccount();
   const client = createTelegraphClient(account, network);
-  const budget = new BudgetGuard(spend.maxPerPackUsd, spend.maxPerDayUsd);
+  // The daily cap holds across requests and restarts because today's spend is read from chain.
+  const spentToday = await spentTodayUsd(account.address, network);
+  if (spentToday >= spend.maxPerDayUsd) throw new BudgetExceededError(`daily cap $${spend.maxPerDayUsd} reached ($${spentToday} spent today, UTC)`);
+  const budget = new BudgetGuard(spend.maxPerPackUsd, spend.maxPerDayUsd, spentToday);
 
   const { findings, verdict } = await runDiligence(input, {
     client,

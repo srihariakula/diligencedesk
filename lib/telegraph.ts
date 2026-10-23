@@ -44,33 +44,58 @@ export function agentAccount(privateKey = process.env.AGENT_PRIVATE_KEY): Privat
  * `payTo` and the amount are always read from the node's 402 challenge, never hardcoded.
  */
 export function createTelegraphClient(account = agentAccount(), network = networkConfig()): TelegraphClient {
-  const paidFetch = wrapFetchWithPaymentFromConfig(fetch, {
-    schemes: [{ network: network.chainId, client: new ExactEvmScheme(account) }],
-  });
+  const schemes = [{ network: network.chainId, client: new ExactEvmScheme(account) }];
 
   return {
     payer: account.address,
     network,
     async ask(minerId, request, signal) {
-      const res = await paidFetch(`${network.nodeUrl}/engine/v1/ask/${encodeURIComponent(minerId)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(request),
-        signal,
-      });
-      const text = await res.text();
-      if (res.status === 402) {
-        // The x402 client already retried with a signed payment; the node says why it refused in the header.
-        const reason = paymentRefusal(res.headers.get("payment-required")) ?? "payment was not accepted";
-        throw new Error(`miner ${minerId}: payment refused (${reason}). Check that ${account.address} holds test USDC on ${network.chainId}.`);
+      // Note whether a signed payment left this process: Telegraph settles it even when the call then fails.
+      let paymentSent = false;
+      const watched: typeof fetch = (input, init) => {
+        const headers = input instanceof Request ? input.headers : new Headers(init?.headers);
+        if (headers.has("payment-signature") || headers.has("x-payment")) paymentSent = true;
+        return fetch(input, init);
+      };
+      const paidFetch = wrapFetchWithPaymentFromConfig(watched, { schemes });
+      try {
+        const res = await paidFetch(`${network.nodeUrl}/engine/v1/ask/${encodeURIComponent(minerId)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(request),
+          signal,
+        });
+        const text = await res.text();
+        if (res.status === 402) {
+          // The x402 client already retried with a signed payment; the node says why it refused in the header.
+          const reason = paymentRefusal(res.headers.get("payment-required")) ?? "payment was not accepted";
+          throw new TelegraphCallError(`miner ${minerId}: payment refused (${reason}). Check that ${account.address} holds test USDC on ${network.chainId}.`, false);
+        }
+        if (!res.ok) {
+          throw new TelegraphCallError(`miner ${minerId}: HTTP ${res.status} ${text.slice(0, 200)}`, paymentSent);
+        }
+        const body = JSON.parse(text) as EngineResponse;
+        return { ...body, receipt: parseReceipt(res.headers.get("x-telegraph-receipt")), httpStatus: res.status };
+      } catch (e) {
+        if (e instanceof TelegraphCallError) throw e;
+        throw new TelegraphCallError(e instanceof Error ? e.message : String(e), paymentSent); // timeouts, network errors
       }
-      if (!res.ok) {
-        throw new Error(`miner ${minerId}: HTTP ${res.status} ${text.slice(0, 200)}`);
-      }
-      const body = JSON.parse(text) as EngineResponse;
-      return { ...body, receipt: parseReceipt(res.headers.get("x-telegraph-receipt")), httpStatus: res.status };
     },
   };
+}
+
+/**
+ * A failed call. `charged` is true once a signed payment was sent: live runs showed Telegraph settling
+ * those even when the miner then timed out or returned HTTP 500, so the spend must be booked, not released.
+ */
+export class TelegraphCallError extends Error {
+  constructor(
+    message: string,
+    readonly charged: boolean,
+  ) {
+    super(message);
+    this.name = "TelegraphCallError";
+  }
 }
 
 /** X-TELEGRAPH-RECEIPT is base64 JSON. Key reconciliation on receipt_hash, not tx_hash (txs are batched). */

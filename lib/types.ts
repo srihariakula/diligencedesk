@@ -45,7 +45,8 @@ export interface CallRecord {
   minerId: string;
   minerName?: string;
   ok: boolean;
-  costUsd: number;
+  costUsd: number; // what was spent, including a failed call whose payment had already been sent
+  skipped?: boolean; // not called: the miner could not be pointed at this company
   latencyMs: number;
   signalHash?: string;
   receipt?: TelegraphReceipt;
@@ -85,8 +86,9 @@ export interface DiligencePack {
   spend: {
     totalUsd: number;
     capUsd: number;
-    paidCalls: number;
+    paidCalls: number; // calls that cost money, answered or not
     failedCalls: number;
+    failedChargedCalls: number; // failed after the payment was sent: Telegraph still settles these
     network: string;
     /** Plain statement of what is real vs stubbed, shown in the spend panel. */
     boundary: string;

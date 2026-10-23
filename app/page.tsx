@@ -93,7 +93,7 @@ export default function Home() {
 
           <div className="card">
             <h3>Spend</h3>
-            <p><b>${pack.spend.totalUsd}</b> of ${pack.spend.capUsd} cap · {pack.spend.paidCalls} paid calls · {pack.spend.failedCalls} failed (not charged) · {pack.spend.network}</p>
+            <p><b>${pack.spend.totalUsd}</b> of ${pack.spend.capUsd} cap · {pack.spend.paidCalls} paid calls · {pack.spend.failedCalls} failed ({pack.spend.failedChargedCalls ?? 0} of them charged) · {pack.spend.network}</p>
             <p className="boundary">{pack.spend.boundary}</p>
             <p className="mono">sha256 {pack.sha256}<br />signed by {pack.signer}<br />{pack.signature}</p>
           </div>

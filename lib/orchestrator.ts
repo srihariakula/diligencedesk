@@ -4,7 +4,7 @@ import { buildRequest, interpret, UnsupportedRequestError } from "./adapters";
 import { floorPriceUsd } from "./registry";
 import { decideVerdict } from "./verdict";
 import type { CallRecord, DiligenceInput, Finding, FindingStatus, Miner } from "./types";
-import type { MinerRequest, TelegraphClient } from "./telegraph";
+import { TelegraphCallError, type MinerRequest, type TelegraphClient } from "./telegraph";
 
 export interface OrchestratorDeps {
   client: Pick<TelegraphClient, "ask">;
@@ -47,7 +47,7 @@ async function checkIntent(intent: DiligenceIntent, input: DiligenceInput, deps:
     } catch (e) {
       if (!(e instanceof UnsupportedRequestError)) throw e;
       // Skipped before paying: asking it would return an answer about some other entity.
-      const skipped: CallRecord = { intent, minerId: String(miner.id), minerName: miner.name, ok: false, costUsd: 0, latencyMs: 0, at: new Date().toISOString(), error: `skipped: ${e.message}` };
+      const skipped: CallRecord = { intent, minerId: String(miner.id), minerName: miner.name, ok: false, skipped: true, costUsd: 0, latencyMs: 0, at: new Date().toISOString(), error: `skipped: ${e.message}` };
       calls.push(skipped);
       deps.onCall?.(skipped);
       continue;
@@ -80,7 +80,9 @@ async function checkIntent(intent: DiligenceIntent, input: DiligenceInput, deps:
       if (reading.status === "unavailable") record.error = reading.summary;
       else answers.push(reading);
     } catch (e) {
-      deps.budget.release(price); // failed calls are not charged
+      // A payment that was already sent is settled even though the call failed: book it.
+      if (e instanceof TelegraphCallError && e.charged) record.costUsd = price;
+      else deps.budget.release(price);
       record.error = msg(e);
     }
     record.latencyMs = Date.now() - started;

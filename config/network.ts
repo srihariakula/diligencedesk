@@ -7,6 +7,7 @@ export interface NetworkConfig {
   chainId: `${string}:${string}`;
   usdcAddress: `0x${string}`;
   explorerTxUrl: string;
+  rpcUrl: string; // read-only chain access, used to total today's spend
 }
 
 export function networkConfig(env: NodeJS.ProcessEnv = process.env): NetworkConfig {
@@ -15,6 +16,7 @@ export function networkConfig(env: NodeJS.ProcessEnv = process.env): NetworkConf
     chainId: (env.CHAIN_ID ?? "eip155:84532") as NetworkConfig["chainId"],
     usdcAddress: (env.USDC_ADDRESS ?? "0x036CbD53842c5426634e7929541eC2318f3dCF7e") as `0x${string}`,
     explorerTxUrl: env.EXPLORER_TX_URL ?? "https://sepolia.basescan.org/tx/",
+    rpcUrl: env.RPC_URL ?? "https://base-sepolia-rpc.publicnode.com", // sepolia.base.org caps getLogs at 200 blocks
   };
 }
 

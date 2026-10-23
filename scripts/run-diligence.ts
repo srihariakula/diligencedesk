@@ -18,5 +18,5 @@ const file = `data/pack-${Date.now()}.json`;
 writeFileSync(file, JSON.stringify(pack, null, 2));
 console.log(`\nVERDICT ${pack.verdict.verdict}`);
 pack.verdict.reasons.forEach((r) => console.log(`  - ${r}`));
-console.log(`Spent $${pack.spend.totalUsd} of $${pack.spend.capUsd} cap, ${pack.spend.paidCalls} paid / ${pack.spend.failedCalls} failed`);
+console.log(`Spent $${pack.spend.totalUsd} of $${pack.spend.capUsd} cap, ${pack.spend.paidCalls} paid / ${pack.spend.failedCalls} failed (${pack.spend.failedChargedCalls} charged)`);
 console.log(`sha256 ${pack.sha256}\nSaved ${file}`);
