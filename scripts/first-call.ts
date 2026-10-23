@@ -2,6 +2,7 @@
  * Makes ONE real paid call (about $0.01 test USDC) and prints the proof you need for the submission.
  *   npm run first-call -- [INTENT]
  */
+import "./env";
 import { DILIGENCE_INTENTS, type DiligenceIntent } from "@/config/intents";
 import { networkConfig } from "@/config/network";
 import { buildRequest } from "@/lib/adapters";

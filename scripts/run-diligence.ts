@@ -2,6 +2,7 @@
  * Full diligence run from the command line. Spends real test USDC up to MAX_SPEND_PER_PACK_USD.
  *   npm run diligence -- "Company Name" HK,SG
  */
+import "./env";
 import { mkdirSync, appendFileSync, writeFileSync } from "node:fs";
 import { diligence } from "@/lib/diligence";
 

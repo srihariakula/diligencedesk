@@ -3,6 +3,7 @@
  * to data/miners.json so you can tune lib/adapters.ts.
  *   npm run discover -- [JURISDICTION]   e.g. SG, to preview the ranking a run in that country would use
  */
+import "./env";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { DILIGENCE_INTENTS } from "@/config/intents";
 import { fetchMiners, floorPriceUsd, rankMiners } from "@/lib/registry";

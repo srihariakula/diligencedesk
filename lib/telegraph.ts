@@ -59,6 +59,11 @@ export function createTelegraphClient(account = agentAccount(), network = networ
         signal,
       });
       const text = await res.text();
+      if (res.status === 402) {
+        // The x402 client already retried with a signed payment; the node says why it refused in the header.
+        const reason = paymentRefusal(res.headers.get("payment-required")) ?? "payment was not accepted";
+        throw new Error(`miner ${minerId}: payment refused (${reason}). Check that ${account.address} holds test USDC on ${network.chainId}.`);
+      }
       if (!res.ok) {
         throw new Error(`miner ${minerId}: HTTP ${res.status} ${text.slice(0, 200)}`);
       }
@@ -73,6 +78,19 @@ export function parseReceipt(header: string | null): TelegraphReceipt | undefine
   if (!header) return undefined;
   try {
     return JSON.parse(Buffer.from(header, "base64").toString("utf8")) as TelegraphReceipt;
+  } catch {
+    return undefined;
+  }
+}
+
+/** PAYMENT-REQUIRED is base64 JSON; after a refused payment its `error` names the cause, e.g. insufficient balance. */
+export function paymentRefusal(header: string | null): string | undefined {
+  if (!header) return undefined;
+  try {
+    const error = (JSON.parse(Buffer.from(header, "base64").toString("utf8")) as { error?: unknown }).error;
+    if (typeof error !== "string" || error.toLowerCase() === "payment required") return undefined;
+    return error.split(/\s\(|\n/)[0]; // drop the chained contract-call dump that follows the cause
+
   } catch {
     return undefined;
   }
