@@ -10,3 +10,5 @@ data/*.db
 .DS_Store
 next-env.d.ts
 tsconfig.tsbuildinfo
+.vercel
+.env*
