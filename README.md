@@ -30,7 +30,7 @@ Web app / CLI ──► Orchestrator ──► x402 payment client ──► Tel
 
 - **Payment:** x402, USDC on Base Sepolia (`eip155:84532`). The amount and `payTo` always come from the node's 402 challenge, never from code.
 - **Redundancy:** asks up to `PROVIDERS_PER_INTENT` providers per Intent. If one errors or times out, it moves to the next. If providers disagree, the more severe answer wins.
-- **Spend controls:** each call is reserved against the caps *before* paying. Failed calls are released, because Telegraph doesn't charge for them.
+- **Spend controls:** each call is reserved against the caps *before* paying. A call that fails before its payment is sent is released; one that fails after is still settled by Telegraph, so it stays booked and shows as charged. The daily cap is checked against today's on-chain spend, so it holds across requests and restarts.
 - **Mainnet readiness:** chain ID, USDC address, node URL and explorer live only in `.env` / `config/`.
 
 ## Quick start
