@@ -4,14 +4,29 @@ import type { DiligenceIntent } from "@/config/intents";
 import { coverageTier, JURISDICTIONAL_INTENTS } from "./coverage";
 import type { Miner } from "./types";
 
-/** Free discovery endpoint: GET /api/miners?intent=... */
-export async function fetchMiners(intent: DiligenceIntent, nodeUrl = networkConfig().nodeUrl): Promise<Miner[]> {
-  const res = await fetch(`${nodeUrl}/api/miners?intent=${encodeURIComponent(intent)}`);
-  if (!res.ok) throw new Error(`GET /api/miners?intent=${intent} -> HTTP ${res.status}`);
-  const body = (await res.json()) as unknown;
-  const list = Array.isArray(body) ? body : ((body as { miners?: Miner[] }).miners ?? []);
-  return (list as Miner[]).filter((m) => (m.supported_intents ?? []).includes(intent));
+/**
+ * Free discovery endpoint: GET /api/miners?intent=... The response is ~200 KB; on Vercel a connection
+ * was once dropped mid-body ("terminated") after a long hang, so each attempt is time-boxed and retried.
+ */
+export async function fetchMiners(intent: DiligenceIntent, nodeUrl = networkConfig().nodeUrl, attempts = 3, timeoutMs = 15_000): Promise<Miner[]> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const res = await fetch(`${nodeUrl}/api/miners?intent=${encodeURIComponent(intent)}`, { signal: AbortSignal.timeout(timeoutMs) });
+      if (res.status >= 400 && res.status < 500) throw new DiscoveryError(`GET /api/miners?intent=${intent} -> HTTP ${res.status}`);
+      if (!res.ok) throw new Error(`GET /api/miners?intent=${intent} -> HTTP ${res.status}`);
+      const body = (await res.json()) as unknown;
+      const list = Array.isArray(body) ? body : ((body as { miners?: Miner[] }).miners ?? []);
+      return (list as Miner[]).filter((m) => (m.supported_intents ?? []).includes(intent));
+    } catch (e) {
+      if (e instanceof DiscoveryError) throw e; // a 4xx will not fix itself
+      lastError = e;
+    }
+  }
+  throw new Error(`miner discovery failed after ${attempts} attempts: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
 }
+
+class DiscoveryError extends Error {}
 
 /** A miner serving this few intents is treated as a dedicated source (e.g. OFAC SDN, SEC EDGAR). */
 export const SPECIALIST_MAX_INTENTS = 3;

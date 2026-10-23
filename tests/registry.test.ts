@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { BLOCKED_MINERS, PREFERRED_MINERS } from "@/config/providers";
 import { rankMiners } from "@/lib/registry";
 import type { Miner } from "@/lib/types";
@@ -90,5 +90,33 @@ describe("rankMiners with curated overrides", () => {
   });
   it("never lists a miner as both blocked and preferred", () => {
     expect(Object.keys(BLOCKED_MINERS).filter((id) => id in PREFERRED_MINERS)).toEqual([]);
+  });
+});
+
+describe("fetchMiners", () => {
+  const ok = (miners: unknown[]) => new Response(JSON.stringify({ miners }), { status: 200 });
+  it("retries a dropped connection and returns the miners for the intent", async () => {
+    const { fetchMiners } = await import("@/lib/registry");
+    let calls = 0;
+    vi.stubGlobal("fetch", async () => {
+      calls++;
+      if (calls === 1) throw new TypeError("terminated");
+      return ok([{ id: 1, supported_intents: ["SANCTIONS_SCREENING_MATCH"] }, { id: 2, supported_intents: ["OTHER"] }]);
+    });
+    expect((await fetchMiners("SANCTIONS_SCREENING_MATCH", "https://node")).map((m) => m.id)).toEqual([1]);
+    expect(calls).toBe(2);
+    vi.unstubAllGlobals();
+  });
+  it("does not retry a 4xx, and gives up after the last attempt", async () => {
+    const { fetchMiners } = await import("@/lib/registry");
+    let calls = 0;
+    vi.stubGlobal("fetch", async () => (calls++, new Response("bad", { status: 400 })));
+    await expect(fetchMiners("SANCTIONS_SCREENING_MATCH", "https://node")).rejects.toThrow(/HTTP 400/);
+    expect(calls).toBe(1);
+    calls = 0;
+    vi.stubGlobal("fetch", async () => (calls++, new Response("down", { status: 503 })));
+    await expect(fetchMiners("SANCTIONS_SCREENING_MATCH", "https://node", 3)).rejects.toThrow(/after 3 attempts.*503/);
+    expect(calls).toBe(3);
+    vi.unstubAllGlobals();
   });
 });
