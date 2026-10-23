@@ -1,10 +1,10 @@
 import { DILIGENCE_INTENTS, type DiligenceIntent } from "@/config/intents";
 import { BudgetExceededError, BudgetGuard } from "./budget";
-import { buildRequest, interpret } from "./adapters";
+import { buildRequest, interpret, UnsupportedRequestError } from "./adapters";
 import { floorPriceUsd } from "./registry";
 import { decideVerdict } from "./verdict";
 import type { CallRecord, DiligenceInput, Finding, FindingStatus, Miner } from "./types";
-import type { TelegraphClient } from "./telegraph";
+import type { MinerRequest, TelegraphClient } from "./telegraph";
 
 export interface OrchestratorDeps {
   client: Pick<TelegraphClient, "ask">;
@@ -41,6 +41,17 @@ async function checkIntent(intent: DiligenceIntent, input: DiligenceInput, deps:
 
   for (const miner of miners) {
     if (answers.length >= deps.providersPerIntent) break;
+    let request: MinerRequest;
+    try {
+      request = buildRequest(intent, miner, input, jurisdiction);
+    } catch (e) {
+      if (!(e instanceof UnsupportedRequestError)) throw e;
+      // Skipped before paying: asking it would return an answer about some other entity.
+      const skipped: CallRecord = { intent, minerId: String(miner.id), minerName: miner.name, ok: false, costUsd: 0, latencyMs: 0, at: new Date().toISOString(), error: `skipped: ${e.message}` };
+      calls.push(skipped);
+      deps.onCall?.(skipped);
+      continue;
+    }
     const price = floorPriceUsd(miner);
     try {
       deps.budget.reserve(price);
@@ -51,7 +62,7 @@ async function checkIntent(intent: DiligenceIntent, input: DiligenceInput, deps:
     const started = Date.now();
     const record: CallRecord = { intent, minerId: String(miner.id), minerName: miner.name, ok: false, costUsd: 0, latencyMs: 0, at: new Date().toISOString() };
     try {
-      const answer = await withTimeout(deps.timeoutMs, (signal) => deps.client.ask(String(miner.id), buildRequest(intent, miner, input, jurisdiction), signal));
+      const answer = await withTimeout(deps.timeoutMs, (signal) => deps.client.ask(String(miner.id), request, signal));
       Object.assign(record, {
         ok: true,
         costUsd: answer.cost_usd ?? price,

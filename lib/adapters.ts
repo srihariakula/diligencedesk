@@ -11,6 +11,9 @@ import type { MinerRequest } from "./telegraph";
  * which the verdict rules turn into REVIEW, never into a false GO.
  */
 
+/** The miner cannot be asked about this company (e.g. it needs a CIK we do not have). Thrown before paying. */
+export class UnsupportedRequestError extends Error {}
+
 export function buildRequest(intent: DiligenceIntent, miner: Miner, input: DiligenceInput, jurisdiction?: string): MinerRequest {
   const { method, endpoint } = pickEndpoint(miner);
   const common = {
@@ -20,9 +23,86 @@ export function buildRequest(intent: DiligenceIntent, miner: Miner, input: Dilig
     registration_number: input.registrationNumber,
     jurisdiction,
   };
-  const payload: Record<string, unknown> =
+  const legacy: Record<string, unknown> =
     intent === "DOCUMENT_AUTHENTICITY" ? { ...common, document_url: input.documentUrl, url: input.documentUrl } : common;
+
+  const schema = schemaOf(miner);
+  if (!schema) return { method, endpoint, payload: dropUndefined(legacy) };
+
+  // Fill the miner's own fields. Unfilled fields fall back to the miner's defaults, which for identity
+  // fields are pinned examples (entity="PUTIN", cik=Apple's): sending those would answer about someone else.
+  const broad = (miner.supported_intents?.length ?? 0) > 3; // multi-intent schemas list every intent's fields
+  const payload: Record<string, unknown> = {};
+  let identityFilled = false;
+  for (const field of Object.keys(schema.properties)) {
+    const role = fieldRole(field);
+    if (!role) continue; // a setting such as format or rows: leave it to the miner's default
+    const value = fillField(role, intent, input, jurisdiction);
+    const identity = role !== "question" && role !== "country";
+    if (value !== undefined) {
+      payload[field] = value;
+      identityFilled ||= identity;
+    } else if (identity && !broad && schema.required.includes(field)) {
+      throw new UnsupportedRequestError(`needs ${field}, which this request cannot supply`);
+    }
+  }
+  if (broad) return { method, endpoint, payload: dropUndefined({ ...legacy, ...payload }) }; // they also read free text
+  if (!identityFilled) throw new UnsupportedRequestError("has no field that identifies the company or document");
   return { method, endpoint, payload: dropUndefined(payload) };
+}
+
+type FieldRole = "company" | "question" | "country" | "registration" | "cik" | "lei" | "ticker" | "url" | "doi" | "archive_item";
+
+/** Field names (lowercased, punctuation stripped) by meaning. Anything else is a setting left to its default. */
+const FIELD_ROLES: [RegExp, FieldRole][] = [
+  [/^(question|claim|prompt|ask)$/, "question"],
+  [/^(country|countrycode|jurisdiction|nation)$/, "country"],
+  [/^(registrationnumber|companynumber|regno|registrationno|businessid|crn|ytunnus|orgnr|organisationnumber)$/, "registration"],
+  [/^cik$/, "cik"],
+  [/^lei$/, "lei"],
+  [/^(ticker|symbol)$/, "ticker"],
+  [/^(url|documenturl|document|link|text|content)$/, "url"],
+  [/^doi$/, "doi"],
+  [/^item$/, "archive_item"],
+  [/^(name|legalname|company|companyname|entity|entityname|organisation|organization|q|query|search|term|conditionsterm)$/, "company"],
+];
+
+function fieldRole(field: string): FieldRole | undefined {
+  const key = field.toLowerCase().replace(/[^a-z]/g, "");
+  return FIELD_ROLES.find(([re]) => re.test(key))?.[1];
+}
+
+function fillField(role: FieldRole, intent: DiligenceIntent, input: DiligenceInput, jurisdiction?: string): unknown {
+  const doc = input.documentUrl;
+  switch (role) {
+    case "company":
+      // On a document check, search fields look for the document, not the company.
+      return intent === "DOCUMENT_AUTHENTICITY" ? doc : input.companyName;
+    case "question":
+      return describeQuery(intent, input, jurisdiction);
+    case "country":
+      return jurisdiction;
+    case "registration":
+      return input.registrationNumber;
+    case "cik":
+      return input.registrationNumber && /^\d{1,10}$/.test(input.registrationNumber) ? input.registrationNumber.padStart(10, "0") : undefined;
+    case "lei":
+      return input.registrationNumber && /^[A-Z0-9]{18}\d{2}$/.test(input.registrationNumber) ? input.registrationNumber : undefined;
+    case "ticker":
+      return undefined; // we never know it; a ticker default would pin another company
+    case "url":
+      return intent === "DOCUMENT_AUTHENTICITY" ? doc : undefined;
+    case "doi":
+      return doc?.match(/10\.\d{4,9}\/[^\s?#]+/)?.[0];
+    case "archive_item":
+      return doc?.match(/archive\.org\/details\/([^/?#]+)/)?.[1];
+  }
+}
+
+function schemaOf(miner: Miner): { properties: Record<string, unknown>; required: string[] } | undefined {
+  const s = miner.input_schema as { properties?: Record<string, unknown>; required?: unknown } | undefined;
+  if (!s?.properties || !Object.keys(s.properties).length) return undefined;
+  return { properties: s.properties, required: Array.isArray(s.required) ? s.required.map(String) : [] };
 }
 
 export function interpret(intent: DiligenceIntent, result: unknown): { status: FindingStatus; summary: string } {

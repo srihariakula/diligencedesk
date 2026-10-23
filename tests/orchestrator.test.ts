@@ -60,3 +60,17 @@ describe("runDiligence", () => {
     expect(budget.spentUsd).toBeLessThanOrEqual(0.03);
   });
 });
+
+describe("runDiligence with unsupported miners", () => {
+  it("skips a miner it cannot target without paying, and moves to the next", async () => {
+    const needsCik: Miner = { ...miner(9), input_schema: { properties: { cik: {} }, required: ["cik"] }, supported_intents: ["X"] };
+    const asked: string[] = [];
+    const d = deps((id, q) => (asked.push(id), clean(q)), { minersFor: async () => [needsCik, miner(1), miner(2)] });
+    const { findings } = await runDiligence(input, d);
+    expect(asked).not.toContain("9");
+    const skipped = findings[0].sources.find((c) => c.minerId === "9");
+    expect(skipped).toMatchObject({ ok: false, costUsd: 0 });
+    expect(skipped?.error).toMatch(/^skipped: needs cik/);
+    expect(d.budget.spentUsd).toBeCloseTo(0.01 * 2 * findings.length);
+  });
+});
